@@ -1,0 +1,56 @@
+[project]
+name = "wallsweep"
+version = "0.1.0"
+description = "NSGA-II tuning of a Crazyflie sweep controller for wall cleaning (MSML642, Group 10)"
+readme = "README.md"
+authors = [
+    { name = "Ravichandra Parvatham", email = "ravip@umd.edu" },
+    { name = "Akhil Kambhatla" },
+]
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "gym-pybullet-drones",
+    "pybullet>=3.2.7",
+    "torch>=2.13",          # pulled in by gym-pybullet-drones; listed so Linux gets the CPU-only build
+    "pymoo>=0.6.1",
+    "numpy>=2.5",
+    "pandas>=2.2",
+    "matplotlib>=3.11",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.8", "ipykernel>=6.29"]
+
+[project.scripts]
+wallsweep = "wallsweep:main"
+
+[build-system]
+requires = ["uv_build>=0.9.7,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+# Lock for the machines we use: Apple Silicon Macs and Linux (VM or cluster).
+environments = [
+    "sys_platform == 'darwin' and platform_machine == 'arm64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'linux' and platform_machine == 'aarch64'",
+]
+
+# PyBullet's bundled zlib redefines fdopen() as NULL on macOS, which breaks against
+# the newer macOS SDK headers. Defining fdopen as itself skips that redefinition.
+# Only affects building PyBullet; harmless on Linux.
+[tool.uv.extra-build-variables]
+pybullet = { CFLAGS = "-Dfdopen=fdopen" }
+
+[tool.uv.sources]
+gym-pybullet-drones = { git = "https://github.com/utiasDSL/gym-pybullet-drones.git", rev = "348b5c18a4bb770a48928b9d044decf77ca33302" }
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100

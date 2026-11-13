@@ -1,0 +1,31 @@
+# Old drafts, kept locally only
+archive/
+
+# Python / uv
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ruff_cache/
+
+# Simulation outputs (regenerable, can get large)
+code/runs/
+code/results/
+*.log
+
+# LaTeX build files
+*.aux
+*.out
+*.toc
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+
+# Large media, submitted separately
+*.mov
+*.zip
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

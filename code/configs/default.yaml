@@ -1,0 +1,14 @@
+# Default run settings (filled in as modules are written).
+nsga:
+  population: 40
+  generations: 50
+  walls_per_candidate: 5
+  workers: null   # null = all cores
+sim:
+  pyb_hz: 240
+  ctrl_hz: 48
+  sweep_hz: 20
+  max_flight_s: 90
+standoff:
+  target_m: 0.30
+  band_m: [0.25, 0.35]

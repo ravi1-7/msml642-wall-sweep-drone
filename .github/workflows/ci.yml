@@ -1,0 +1,26 @@
+# Installs the project on Linux and runs a short simulated flight on every push,
+# so we know it will run on a VM or the cluster if we need more compute.
+name: linux-check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: code
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.9.7"
+          enable-cache: true
+      - name: Install
+        run: uv sync --locked
+      - name: Hover
+        run: uv run python scripts/smoke_test.py
+      - name: Timing
+        run: uv run python scripts/time_one_flight.py --workers 2
