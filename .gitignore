@@ -29,3 +29,6 @@ code/results/
 .DS_Store
 .vscode/
 .idea/
+
+#evidence
+**/evidence/

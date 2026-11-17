@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import math
+
 import numpy as np
 import pybullet as p
 from gym_pybullet_drones.envs.CtrlAviary import CtrlAviary
@@ -30,6 +32,10 @@ STANDOFF = 0.30
 RANGE_MAX = 4.0  # Multi-ranger maximum range (m)
 RAY_START = 0.065  # rays start just outside the drone's 6 cm collision disc
 SPRAY_PUSH_N = 0.003  # spray jet pushes the drone away from the wall while spraying
+GROUND_ARMED_Z = 0.15
+TUMBLE_RAD = math.radians(60.0)
+OOB_MARGIN = 1.0
+OOB_WALL_DIST = 1.5
 
 # Glass and time-of-flight sensors: most infrared light passes through glass, and what reflects
 # bounces off like a mirror, so readings are reliable only nearly head-on (Hopkins et al. 2025,
@@ -264,6 +270,10 @@ class FacadeAviary(CtrlAviary):
         self.facade = facade
         self.glass_dropout = glass_dropout
         self.dropouts = 0  # glass readings lost so far
+        self.failure: str | None = None
+        self.failure_time: float | None = None
+        self._airborne = False
+        self._contact_this_step = False
         self.gusts = gusts or Gusts("none")
         self.hose = hose
         self.spraying = False
@@ -286,6 +296,7 @@ class FacadeAviary(CtrlAviary):
         )
         self.dry_mass = self.M
         self.mass = self.M  # current mass (kg): dry drone + lifted hose
+        self.dry_inertia = p.getDynamicsInfo(self.DRONE_IDS[0], -1, physicsClientId=self.CLIENT)[2]
 
     # -- hooks into the simulator
 
@@ -298,14 +309,27 @@ class FacadeAviary(CtrlAviary):
         self.sim_time = 0.0
         self.spraying = False
         self.dropouts = 0
+        self.failure = None
+        self.failure_time = None
+        self._airborne = False
+        self._contact_this_step = False
+        out = super().reset(seed=seed, options=options)
         if hasattr(self, "dry_mass"):
             self.mass = self.dry_mass
-        return super().reset(seed=seed, options=options)
+            self._set_dynamics()
+        return out
+
+    def _set_dynamics(self):
+        p.changeDynamics(
+            self.DRONE_IDS[0], -1, mass=self.mass, localInertiaDiagonal=self.dry_inertia,
+            physicsClientId=self.CLIENT,
+        )
 
     def step(self, action):
+        self._contact_this_step = False
         if self.hose is not None:  # more hose is lifted as the drone climbs
             self.mass = self.dry_mass + self.hose.lifted_mass(self.pos[0][2])
-            p.changeDynamics(self.DRONE_IDS[0], -1, mass=self.mass, physicsClientId=self.CLIENT)
+            self._set_dynamics()
         return super().step(action)
 
     def _physics(self, rpm, nth_drone):
@@ -323,7 +347,38 @@ class FacadeAviary(CtrlAviary):
                 drone, -1, forceObj=f.tolist(), posObj=pos, flags=p.WORLD_FRAME,
                 physicsClientId=self.CLIENT,
             )
+        self._check_failure(drone, np.array(pos))
         self.sim_time += self.PYB_TIMESTEP
+
+    def _check_failure(self, drone, pos):
+        pts = p.getContactPoints(bodyA=int(drone), physicsClientId=self.CLIENT) or ()
+        touching = any(c[2] in self._facade_set and (c[9] > 0 or c[8] < 0) for c in pts)
+        if touching:
+            self._contact_this_step = True
+        if self.failure is not None:
+            return
+        self._airborne = self._airborne or pos[2] > GROUND_ARMED_Z
+        failure = None
+        if touching:
+            failure = "facade_contact"
+        elif self._airborne and any(c[2] not in self._facade_set for c in pts):
+            failure = "ground"
+        else:
+            _, quat = p.getBasePositionAndOrientation(drone, physicsClientId=self.CLIENT)
+            roll, pitch, _ = p.getEulerFromQuaternion(quat)
+            local = self.facade.to_local(pos)
+            if abs(roll) > TUMBLE_RAD or abs(pitch) > TUMBLE_RAD:
+                failure = "tumble"
+            elif (
+                abs(local[1]) > self.facade.width / 2 + OOB_MARGIN
+                or local[2] < -OOB_MARGIN
+                or local[2] > self.facade.height + OOB_MARGIN
+                or abs(local[0]) > OOB_WALL_DIST
+            ):
+                failure = "out_of_bounds"
+        if failure is not None:
+            self.failure = failure
+            self.failure_time = self.sim_time
 
     # -- what the controller and the scorer can read
 
@@ -382,8 +437,5 @@ class FacadeAviary(CtrlAviary):
         )
 
     def in_contact(self) -> bool:
-        """True if the drone is touching any part of the facade (wall, glass, sill, ledge)."""
-        pts = p.getContactPoints(bodyA=int(self.DRONE_IDS[0]), physicsClientId=self.CLIENT)
-        if pts is None:  # GUI was busy (e.g. a mouse click) and the read failed
-            return False
-        return any(c[2] in self._facade_set for c in pts)
+        """True if the drone touching any part of the facade (wall, glass, sill, ledge)."""
+        return self._contact_this_step
