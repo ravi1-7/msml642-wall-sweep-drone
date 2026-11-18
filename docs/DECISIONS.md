@@ -17,11 +17,13 @@ file first and say why.
 
 | Cleanable | Excluded |
 |---|---|
-| Main wall face | Tops and undersides of sills, hoods and ledges |
-| Glass | Window side walls |
+| Window glass | Main wall face |
+| | Tops, fronts and undersides of sills, hoods and ledges |
+| | Window side walls |
 | | Anything below 0.15 m height |
 
-Coverage = cleaned cleanable squares / all cleanable squares on that wall.
+Coverage = cleaned glass squares / all glass squares on that wall.
+The drone holds 0.25 to 0.35 m from the main wall plane; the sprayer is assumed to reach recessed glass up to 0.40 m away.
 
 ## 2. Flight limits
 
@@ -98,3 +100,4 @@ Run once, after all tuning is finished. No changes to any controller after this.
 | Original test sets | Test sets regenerated (old ones kept as dev and dev_harder) |
 | 20 test flights per gust level per controller | 300 test flights per controller (100 walls x 3 gust levels) plus 50 harder |
 | Hand tuned on a flat wall without wind | Unchanged |
+| Wall and glass coverage | Windows only (team decision, Nov 18) |
