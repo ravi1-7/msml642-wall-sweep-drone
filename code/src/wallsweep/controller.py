@@ -4,7 +4,8 @@ Pure Python, no simulator imports. Call step() once per sweep step (SWEEP_HZ) wi
 observation (height, vx, vy, yaw), the latest WallEstimate and the new front reading (None when
 no new reading arrived this step). It returns an Action: a body-frame velocity command for the
 Adapter, the spray flag, and requests the caller applies to the WallEstimator in this order:
-reset_estimator, reset_along, reset_slope.
+reset_estimator, reset_along, then reset_slope(slope_yaw_change) when slope_yaw_change is not None.
+slope_yaw_change is the drone yaw change applied at the pass end (0.0 without a trim).
 
 States: TAKEOFF to 0.10 m, ALIGN (yaw scan and least-squares fit, then turn), CLIMB to the next
 row with an extra back-off and the spray off, SWEEP along the row, INSET back onto the wall after
@@ -168,7 +169,7 @@ class Action:
     state: State
     reset_estimator: float | None = None
     reset_along: float | None = None
-    reset_slope: bool = False
+    slope_yaw_change: float | None = None
 
 
 @dataclass
@@ -287,7 +288,7 @@ class SweepController:
             state=self.state,
             reset_estimator=self._req.get("reset_estimator"),
             reset_along=self._req.get("reset_along"),
-            reset_slope=self._req.get("reset_slope", False),
+            slope_yaw_change=self._req.get("slope_yaw_change"),
         )
 
     def _enter(self, state: State) -> None:
@@ -419,12 +420,14 @@ class SweepController:
     def _pass_end(self, est: WallEstimate, expected: float, anchored: bool) -> None:
         if anchored:
             self._req["reset_along"] = expected + self.dir * EDGE_TRIGGER_OFFSET
+        yaw_change = 0.0
         if est.wall_slope is not None:
             delta = float(np.clip(self.p.yaw_trim_gain * math.atan(est.wall_slope),
                                   -TRIM_MAX, TRIM_MAX))
             self.yaw_target = wrap(self.yaw_target - delta)
             self.stats.trims.append(delta)
-        self._req["reset_slope"] = True
+            yaw_change = -delta
+        self._req["slope_yaw_change"] = yaw_change
         self.stats.passes.append((self.row_z, self.dir, anchored))
         self.dir = -self.dir
         if self.homing:
