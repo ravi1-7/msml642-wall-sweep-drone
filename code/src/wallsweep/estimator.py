@@ -30,6 +30,8 @@ import math
 from dataclasses import dataclass
 from enum import Enum
 
+import numpy as np
+
 RANGE_MAX = 4.0
 
 
@@ -154,6 +156,13 @@ class WallEstimator:
     SLOPE_MIN_POINTS = 6
     SLOPE_MIN_SPAN_M = 0.15
     PROTRUSION_RELOCK_TRAVEL_M = 0.60
+    PRED_SLOPE_SPAN_M = 0.5
+    PRED_SLOPE_SPACING_M = 0.01
+    PRED_SLOPE_MIN_DA = 0.15
+    PRED_SLOPE_MIN_PAIRS = 100
+    PRED_SLOPE_STEP_M = 0.03
+    PRED_SLOPE_MAX = 0.18
+    PRED_SLOPE_MAX_POINTS = 64
 
     def __init__(self, initial_distance: float | None = None):
         self.reset(initial_distance)
@@ -163,6 +172,9 @@ class WallEstimator:
         self.along = 0.0
         self.forward = 0.0
         self.slope_points: list[tuple[float, float]] = []
+        self.raw_points: list[tuple[float, float]] = []
+        self.pred_slope = 0.0
+        self.carry_slope = 0.0
         self.lost_count = 0
         self.relock_count = 0
         self.prot_travel: float | None = None
@@ -196,10 +208,21 @@ class WallEstimator:
         shift = float(value) - self.along
         self.along = float(value)
         self.slope_points = [(a + shift, x) for a, x in self.slope_points]
+        self.raw_points = [(a + shift, x) for a, x in self.raw_points]
 
-    def reset_slope(self) -> None:
-        """Clear the slope points, e.g. at the start of a pass."""
+    def reset_slope(self, yaw_change_rad: float | None = None) -> None:
+        """Clear the slope points at a pass start; carry the prediction slope rotated by the yaw change, or restart it from 0."""
+        base = self.wall_slope
+        if base is None:
+            base = self.pred_slope
         self.slope_points = []
+        self.raw_points = []
+        if yaw_change_rad is None:
+            self.carry_slope = 0.0
+        else:
+            s = math.tan(math.atan(base) + float(yaw_change_rad))
+            self.carry_slope = min(max(s, -self.PRED_SLOPE_MAX), self.PRED_SLOPE_MAX)
+        self.pred_slope = self.carry_slope
 
     @property
     def wall_slope(self) -> float | None:
@@ -249,11 +272,12 @@ class WallEstimator:
         self.blind_time += dt
         self.no_wall_time += dt
         if self.wall is not None:
-            self._predict(vx * dt, dt)
+            self._predict((vx - self.pred_slope * vy) * dt, dt)
         if front is not None:
             if 0.0 <= front < self.USABLE_MAX:
                 self._observe(float(front))
                 self._record_slope(float(front))
+                self._record_raw(float(front))
             else:
                 self.surface = Surface.NONE
         if self.wall is not None and (
@@ -402,6 +426,25 @@ class WallEstimator:
         if self.surface is not Surface.WALL:
             return
         self.slope_points.append((self.along, z + self.forward))
+
+    def _record_raw(self, z: float) -> None:
+        pts = self.raw_points
+        if pts and abs(self.along - pts[-1][0]) < self.PRED_SLOPE_SPACING_M:
+            return
+        pts.append((self.along, z + self.forward))
+        pts = [p for p in pts if abs(p[0] - self.along) <= self.PRED_SLOPE_SPAN_M]
+        self.raw_points = pts[-self.PRED_SLOPE_MAX_POINTS:]
+        a = np.array([p[0] for p in self.raw_points])
+        x = np.array([p[1] for p in self.raw_points])
+        run = np.concatenate([[0], np.cumsum(np.abs(np.diff(x)) > self.PRED_SLOPE_STEP_M)])
+        i, j = np.triu_indices(a.size, 1)
+        da = a[j] - a[i]
+        keep = (np.abs(da) >= self.PRED_SLOPE_MIN_DA) & (run[i] == run[j])
+        if keep.sum() < self.PRED_SLOPE_MIN_PAIRS:
+            self.pred_slope = self.carry_slope
+            return
+        s = float(np.median((x[j] - x[i])[keep] / da[keep]))
+        self.pred_slope = min(max(s, -self.PRED_SLOPE_MAX), self.PRED_SLOPE_MAX)
 
     def _update_nearest(self, z: float) -> None:
         if self.surface is Surface.PROTRUSION and z < self.nearest:
