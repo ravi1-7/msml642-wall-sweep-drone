@@ -11,6 +11,7 @@ __pycache__/
 # Simulation outputs (regenerable, can get large)
 code/runs/
 code/results/
+code/local_tests/
 *.log
 
 # LaTeX build files
