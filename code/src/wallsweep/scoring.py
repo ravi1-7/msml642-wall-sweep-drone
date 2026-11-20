@@ -1,4 +1,4 @@
-"""Flight scores: glass coverage, time, failure, following docs/DECISIONS.md."""
+"""Flight scores: glass coverage, time and failure."""
 
 from __future__ import annotations
 
