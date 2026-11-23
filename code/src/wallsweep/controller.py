@@ -59,6 +59,9 @@ INSET_MAX = 0.15
 COASTING_FACTOR = 0.5
 
 CLIMB_BACKOFF = 0.04
+WALL_MAX = 0.60  # a wall estimate farther than this is not the wall (e.g. the ground past an edge)
+GUARD_M = 0.15  # any surface closer than this on the front sensor: back away (= lowest sill_response)
+GUARD_SPEED = 0.10
 CLIMB_BACKOFF_TOL = 0.01
 CLIMB_WAIT_MAX_S = 1.5
 LEDGE_DROP = 0.08
@@ -188,15 +191,23 @@ def wrap(a):
 
 
 def fit_wall_yaw(samples, center: float | None = None) -> tuple[float, float] | None:
-    """Least-squares fit of r = d / cos(yaw - yaw0) to (range, yaw) samples.
+    """Least-squares fit of r = (d - p.n) / cos(yaw - yaw0) to (range, yaw) or
+    (range, yaw, x, y) samples.
 
-    Readings at or past RANGE_USABLE are ignored. Returns (yaw0, d), or None with too few points.
+    (x, y) is how far the drone has moved since the scan started (world frame, from the Flow
+    deck), and n = (cos yaw0, sin yaw0) points at the wall, so a gust that pushes the drone
+    during the scan is not mistaken for a different wall angle. Without (x, y) the drone is
+    taken to stay still. Readings at or past RANGE_USABLE are ignored. Returns (yaw0, d), with d
+    the distance from the scan's starting point, or None with too few points.
     """
-    pts = [(r, y) for r, y in samples if r is not None and 0.0 < r < RANGE_USABLE]
+    pts = [(s[0], s[1], *(s[2:4] or (0.0, 0.0))) for s in samples
+           if s[0] is not None and 0.0 < s[0] < RANGE_USABLE]
     if len(pts) < FIT_MIN_POINTS:
         return None
-    r = np.array([p[0] for p in pts])
+    r0 = np.array([p[0] for p in pts])
     yaw = np.array([p[1] for p in pts])
+    px = np.array([p[2] for p in pts])
+    py = np.array([p[3] for p in pts])
     if center is None:
         center = math.atan2(np.sin(yaw).mean(), np.cos(yaw).mean())
 
@@ -204,6 +215,8 @@ def fit_wall_yaw(samples, center: float | None = None) -> tuple[float, float] | 
         cos = np.cos(wrap(yaw[None, :] - y0[:, None]))
         bad = (cos < 0.1).any(axis=1)
         c = 1.0 / np.maximum(cos, 0.1)
+        moved = px[None, :] * np.cos(y0)[:, None] + py[None, :] * np.sin(y0)[:, None]
+        r = r0[None, :] + moved * c  # reading had the drone stayed at the start
         d = (c * r).sum(axis=1) / (c * c).sum(axis=1)
         err = ((r - d[:, None] * c) ** 2).sum(axis=1)
         return np.where(bad, np.inf, err), d
@@ -241,7 +254,8 @@ class SweepController:
         self.integral = 0.0
         self.out = np.zeros(2)
         self.yaw_target: float | None = None
-        self.scan: list[tuple[float, float]] = []
+        self.scan: list[tuple[float, ...]] = []
+        self.scan_pos = np.zeros(2)
         self.scan_center: float | None = None
         self.turning = False
         self.turn_t = 0.0
@@ -250,6 +264,7 @@ class SweepController:
         self.row_z = self.z_first
         self.row_target: float | None = self.z_first
         self.z_cmd = TAKEOFF_Z
+        self.front_last: float | None = None
         self.lost_run = 0
         self.valid_run = 0
         self.inset_from: float | None = None
@@ -261,6 +276,8 @@ class SweepController:
 
     def step(self, obs: Obs, est: WallEstimate, front: float | None = None) -> Action:
         self._track(obs, est)
+        if front is not None:
+            self.front_last = float(front) if front < RANGE_USABLE else None
         if self.yaw_target is None:
             self.yaw_target = float(obs.yaw)
         self._req = {}
@@ -302,7 +319,7 @@ class SweepController:
         self._entered = True
 
     def _track(self, obs: Obs, est: WallEstimate) -> None:
-        if est.wall is not None:
+        if est.wall is not None and est.wall <= WALL_MAX:
             self.wall, self.nearest = est.wall, est.nearest
         elif self.wall is not None:
             self.wall -= obs.vx * self.dt
@@ -322,6 +339,8 @@ class SweepController:
         vx = kp * e + ki * self.integral - kd * obs.vx
         if self.nearest is not None and self.nearest < self.p.sill_response:
             vx = min(vx, kp * (self.nearest - self.p.sill_response))
+        if self.front_last is not None and self.front_last < GUARD_M:
+            vx = min(vx, -GUARD_SPEED)
         return float(np.clip(vx, -VX_MAX, VX_MAX))
 
     def _yaw_rate(self, obs: Obs) -> float:
@@ -335,18 +354,24 @@ class SweepController:
             self._enter(State.ALIGN)
             self.scan_center = float(obs.yaw)
             self.scan = []
+            self.scan_pos = np.zeros(2)
             self.turning = False
         return 0.0, 0.0, 0.0, False
 
     def _align(self, obs, est, front):
         self.z_cmd = TAKEOFF_Z
         if not self.turning:
+            c, s = math.cos(obs.yaw), math.sin(obs.yaw)
+            self.scan_pos += np.array([c * obs.vx - s * obs.vy, s * obs.vx + c * obs.vy]) * self.dt
             if front is not None:
-                self.scan.append((float(front), float(obs.yaw)))
+                self.scan.append((float(front), float(obs.yaw), *self.scan_pos))
             w = math.tau / SCAN_S
             rate = SCAN_AMPLITUDE * w * math.cos(w * self.t_state)
             if self.t_state + self.dt >= SCAN_S - 1e-9:
                 fit = fit_wall_yaw(self.scan, self.scan_center)
+                if fit is not None:  # distance from where the drone is now, not where it started
+                    n = np.array([math.cos(fit[0]), math.sin(fit[0])])
+                    fit = (fit[0], fit[1] - float(self.scan_pos @ n))
                 self.stats.fit = fit
                 self.yaw_target = fit[0] if fit is not None else self.scan_center
                 self.turning = True
