@@ -127,6 +127,14 @@ def check_disjoint() -> None:
     assert len(set(seeds)) == total, f"{total - len(set(seeds))} duplicate facade seeds"
 
 
+TRAINING_WALLS = ((0, "none"), (1, "moderate"), (2, "moderate"), (3, "strong"), (4, "strong"))
+
+
+def training_flights() -> list[Conditions]:
+    """The 5 training flights every search candidate flies: (train index, gust level)."""
+    return [conditions("train", i, g) for i, g in TRAINING_WALLS]
+
+
 def final_test_flights() -> list[Conditions]:
     """The 300 final test flights: every test wall at every gust level."""
     return [conditions("test", i, g) for i in range(SETS["test"][1]) for g in GUST_LEVELS]
