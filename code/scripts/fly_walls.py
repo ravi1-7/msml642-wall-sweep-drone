@@ -2,7 +2,7 @@
 
 Examples (from the code/ folder):
     uv run python scripts/fly_walls.py                          # hand-tuned settings, 5 training walls
-    uv run python scripts/fly_walls.py --set val --index 0 1 2  # validation walls at their own gusts
+    uv run python scripts/fly_walls.py --set dev_val --index 0 1 2  # old validation walls at their own gusts
     uv run python scripts/fly_walls.py --set train --index 4 --gust strong --gui   # watch a flight
     uv run python scripts/fly_walls.py --gui --speed 8          # watch all 5, 8x faster than real time
     uv run python scripts/fly_walls.py --set train --index 4 --gust strong --change sill_response=0.28
@@ -16,7 +16,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
-from demo import camera
+from demo import add_heldout_flag, camera, check_heldout
 
 from wallsweep.conditions import SETS, conditions, training_flights
 from wallsweep.controller import HAND_TUNED
@@ -98,7 +98,9 @@ def main():
     ap.add_argument("--speed", type=float, default=4.0, help="with --gui: times faster than real time")
     ap.add_argument("--change", nargs="+", default=[], metavar="NAME=VALUE",
                     help="change hand-tuned settings, e.g. sill_response=0.28 sweep_speed=0.4")
+    add_heldout_flag(ap)
     a = ap.parse_args()
+    check_heldout(ap, a)
 
     params = replace(HAND_TUNED, **{k: float(v) for k, v in (c.split("=") for c in a.change)})
     if a.change:
