@@ -265,6 +265,7 @@ class SweepController:
         self.row_target: float | None = self.z_first
         self.z_cmd = TAKEOFF_Z
         self.front_last: float | None = None
+        self.climb_prev_front: float | None = None
         self.lost_run = 0
         self.valid_run = 0
         self.inset_from: float | None = None
@@ -316,6 +317,7 @@ class SweepController:
         self.valid_run = 0
         self.inset_from = None
         self.raising = False
+        self.climb_prev_front = None
         self._entered = True
 
     def _track(self, obs: Obs, est: WallEstimate) -> None:
@@ -399,20 +401,21 @@ class SweepController:
             or self.t_state >= CLIMB_WAIT_MAX_S - 1e-9
         ):
             self.raising = True
-        if self.raising:
+        if front is not None and front < RANGE_USABLE:
             if (
-                front is not None
-                and front < RANGE_USABLE
-                and self.wall is not None
-                and self.wall - front > LEDGE_DROP
+                self.raising
+                and self.climb_prev_front is not None
+                and self.climb_prev_front < WALL_MAX
+                and self.climb_prev_front - front > LEDGE_DROP
             ):
                 self._log_ledge(obs.height)
-            if self.state is State.CLIMB:
-                self.z_cmd = self.row_target
-                self.hold = self.hold + self.dt if abs(obs.height - self.row_target) < Z_TOL else 0.0
-                if self.hold >= ROW_HOLD_S - 1e-9:
-                    self.row_z = self.row_target
-                    self._enter(State.SWEEP)
+            self.climb_prev_front = front
+        if self.raising and self.state is State.CLIMB:
+            self.z_cmd = self.row_target
+            self.hold = self.hold + self.dt if abs(obs.height - self.row_target) < Z_TOL else 0.0
+            if self.hold >= ROW_HOLD_S - 1e-9:
+                self.row_z = self.row_target
+                self._enter(State.SWEEP)
         return vx, 0.0, self._yaw_rate(obs), False
 
     def _sweep(self, obs, est, front):

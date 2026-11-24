@@ -36,3 +36,11 @@ We model contact-free spray cleaning, the way commercial cleaning drones work, i
 
 The drone's load changes during the flight. Like commercial cleaning drones (e.g. Lucid Bots Sherpa), our drone is fed cleaning liquid through a hose from a pump on the ground, so it never carries a tank or runs dry, and doesn't spend battery lifting liquid it hasn't sprayed yet. The cost is that the higher it climbs, the more hose hangs below it, so the load it lifts, and how it responds to the same commands, keeps changing with height. The controller must work from the bottom of the wall (little hose lifted) to the top (the most hose lifted).
 
+## Known issues
+
+- test[45] strong and test[34] strong: a sweep row can be placed just under a ledge the front sensor never saw during the climb, and the gusts lift the drone into it.
+- test[2] none, test[49] strong, test[98] moderate: the single-reading ledge test can log a fake ledge from one noisy or gust-tilted reading, which skips rows and lowers coverage.
+- val[19] and test[86]: the wall slope carried from the previous pass can be wrong, so the wall distance estimate drifts too far out and the real wall is mistaken for a protrusion.
+- test[76] strong: in strong gusts the ALIGN scan can leave the yaw about 15° off, more than the estimator's slope limit can follow, so the wall estimate diverges.
+- test[39] strong: the flight runs out of time because its time limit leaves no margin for the extra time strong gusts cost.
+

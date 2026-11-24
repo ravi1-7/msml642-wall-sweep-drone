@@ -13,9 +13,10 @@ CELL_M = 0.05
 FOOTPRINT_M = 0.10
 BAND = (0.25, 0.35)
 MIN_HEIGHT_M = 0.15
-REF_ROW_M = 0.10
+REF_ROW_M = 0.09
 REF_SPEED = 0.25
 TIME_MARGIN = 1.3
+ROW_CHANGE_S = 2.0
 TIME_EXTRA_S = 20.0
 
 SURFACE_KINDS = ("wall", "glass")
@@ -86,13 +87,14 @@ def cleanable_map(facade: Facade) -> CleanableMap:
 
 
 def time_limit(facade: Facade) -> float:
-    """T_max from the reference path: rows every REF_ROW_M from the lowest footprint row to the top."""
+    """T_max from the reference path: rows every REF_ROW_M from the lowest footprint row to the top,
+    plus ROW_CHANGE_S per row."""
     half = FOOTPRINT_M / 2
     z_first = MIN_HEIGHT_M + half
     z_last = max(facade.height - half, z_first)
     n_rows = math.ceil((z_last - z_first) / REF_ROW_M - 1e-9) + 1
     length = n_rows * (facade.width - FOOTPRINT_M) + (z_last - z_first)
-    return TIME_MARGIN * length / REF_SPEED + TIME_EXTRA_S
+    return TIME_MARGIN * length / REF_SPEED + n_rows * ROW_CHANGE_S + TIME_EXTRA_S
 
 
 class Scorer:
