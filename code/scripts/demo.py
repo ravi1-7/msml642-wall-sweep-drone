@@ -10,7 +10,7 @@ Examples (from the code/ folder):
     uv run python scripts/demo.py --seed 7 --gust strong
     uv run python scripts/demo.py --harder --hose 3
     uv run python scripts/demo.py --glass-dropout 0.4    # glass reads badly
-    uv run python scripts/demo.py --set test --index 4   # a wall from a fixed set
+    uv run python scripts/demo.py --set dev_test --index 4   # a wall from a fixed set
     uv run python scripts/demo.py --flat
     uv run python scripts/demo.py --snapshot results/wall.png   # no window, save a picture
 """
@@ -24,7 +24,7 @@ from gym_pybullet_drones.control.DSLPIDControl import DSLPIDControl
 from gym_pybullet_drones.utils.enums import DroneModel
 from gym_pybullet_drones.utils.utils import sync
 
-from wallsweep.conditions import SETS, conditions
+from wallsweep.conditions import SETS, TEST_SET, VAL_SET, conditions
 from wallsweep.estimator import StandoffKF
 from wallsweep.hose import Hose
 from wallsweep.world import CTRL_HZ, STANDOFF, FacadeAviary, Gusts, sample_facade
@@ -32,6 +32,19 @@ from wallsweep.world import CTRL_HZ, STANDOFF, FacadeAviary, Gusts, sample_facad
 BAND = (0.25, 0.35)
 SPEED = 0.25  # m/s along the scripted path
 STEP_UP = 0.30  # m between passes
+HELDOUT_SETS = (VAL_SET, TEST_SET, "harder")
+
+
+def add_heldout_flag(ap):
+    ap.add_argument("--allow-heldout", action="store_true",
+                    help=f"allow --set {', '.join(HELDOUT_SETS)} (held out for validation and the "
+                         "final test)")
+
+
+def check_heldout(ap, a):
+    if a.set in HELDOUT_SETS and not a.allow_heldout:
+        ap.error(f"--set {a.set} is held out for validation or the final test; "
+                 "pass --allow-heldout to fly it anyway")
 
 
 def scripted_path(facade):
@@ -85,11 +98,13 @@ def run():
     ap.add_argument("--glass-dropout", type=float, default=0.15,
                     help="chance a head-on reading off glass is lost (0 to 1)")
     ap.add_argument("--set", choices=list(SETS),
-                    help="load a wall from a fixed set (train/val/test/harder) with its own gusts, "
+                    help="load a wall from a fixed set (train or a dev set) with its own gusts, "
                          "glass and hose; ignores the options above")
     ap.add_argument("--index", type=int, default=0, help="wall number within --set")
     ap.add_argument("--snapshot", help="save a picture of the scene here instead of a window")
+    add_heldout_flag(ap)
     a = ap.parse_args()
+    check_heldout(ap, a)
 
     gui = a.snapshot is None
     if a.set:
