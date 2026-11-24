@@ -3,12 +3,14 @@
 Each set has its own set code and a fixed number of walls:
 
     train: code 0, 20,000 walls. Used by NSGA-II and random search.
-    val: code 1, 50 walls. Used to pick controllers from the Pareto front.
+    dev_val: code 1, 50 walls. Former validation walls, seen during debugging, now a dev set.
     dev: code 2, 100 walls. Former test walls, kept for development and debugging.
     dev_harder: code 3, 50 walls. Former harder walls, kept for development and debugging.
-    test: code 4, 100 walls. Held out. Each wall is flown at all 3 gust levels (300 flights).
+    dev_test: code 4, 100 walls. Former test walls, seen during debugging, now a dev set.
     harder: code 5, 50 walls. Held out. Deeper features, strong gusts, more glass dropouts
         and a heavier hose.
+    val2: code 6, 50 walls. Used to pick controllers from the Pareto fronts.
+    test2: code 7, 100 walls. Held out. Each wall is flown at all 3 gust levels (300 flights).
 
 Each wall gets three independent seeds, drawn from np.random.SeedSequence([set_code, index,
 stream]) with stream 0 for the facade, 1 for the gusts and 2 for the sensor noise. The gust seed
@@ -33,12 +35,16 @@ GUST_LEVELS = ("none", "moderate", "strong")
 
 SETS = {
     "train": (0, 20_000),
-    "val": (1, 50),
+    "dev_val": (1, 50),
     "dev": (2, 100),
     "dev_harder": (3, 50),
-    "test": (4, 100),
+    "dev_test": (4, 100),
     "harder": (5, 50),
+    "val2": (6, 50),
+    "test2": (7, 100),
 }
+VAL_SET = "val2"
+TEST_SET = "test2"
 SET_CODE = {name: code for name, (code, _) in SETS.items()}
 HARDER_SETS = ("harder", "dev_harder")
 
@@ -88,8 +94,8 @@ def set_size(name: str) -> int:
 
 
 def conditions(set_name: str, index: int, gust: str | None = None) -> Conditions:
-    """Conditions for wall `index` of a set. `gust` overrides the set's gust level (the test set
-    is meant to be flown at all three)."""
+    """Conditions for wall `index` of a set. `gust` overrides the set's gust level (the test2
+    set is meant to be flown at all three)."""
     code, size = SETS[set_name]
     if index < 0 or index >= size:
         raise IndexError(f"{set_name} has {size} walls; index {index} is out of range")
@@ -135,6 +141,11 @@ def training_flights() -> list[Conditions]:
     return [conditions("train", i, g) for i, g in TRAINING_WALLS]
 
 
+def val_flights() -> list[Conditions]:
+    """The 50 validation flights: every val2 wall at its own gust level."""
+    return [conditions(VAL_SET, i) for i in range(set_size(VAL_SET))]
+
+
 def final_test_flights() -> list[Conditions]:
-    """The 300 final test flights: every test wall at every gust level."""
-    return [conditions("test", i, g) for i in range(SETS["test"][1]) for g in GUST_LEVELS]
+    """The 300 final test flights: every test2 wall at every gust level."""
+    return [conditions(TEST_SET, i, g) for i in range(set_size(TEST_SET)) for g in GUST_LEVELS]
